@@ -1,0 +1,79 @@
+/*----------------------------------------------------------------------------*/
+/* Copyright (c) 2020 FRC Team 2077. All Rights Reserved.                     */
+/* Open Source Software - may be modified and shared by FRC teams.            */
+/*----------------------------------------------------------------------------*/
+
+
+//TODO: FIX *************************8
+package org.usfirst.frc.team2077.commands;
+
+import edu.wpi.first.wpilibj2.command.CommandBase;
+import edu.wpi.first.wpilibj2.command.CommandScheduler;
+
+import static org.usfirst.frc.team2077.Robot.*;
+import org.usfirst.frc.team2077.commands.MoveAngleTarget;
+
+import org.usfirst.frc.team2077.DriveStation;
+
+public class ContinousAimToTarget3 extends CommandBase {
+  private double oldAngle;
+  private double dpsAccel = 5;
+  private double roboAngle;
+  private double velocity = 5;
+  private final double maxDPS = 30;
+  private double FHeading;
+  private boolean startDeccel;
+  private double dpsDeccel = 5;
+  private double deccel;
+
+
+  public ContinousAimToTarget3() {
+    addRequirements(robot_.heading_);
+    oldAngle = robot_.angleSensor_.getAngle();
+
+  }
+
+  @Override
+  public void execute() {
+    roboAngle = robot_.angleSensor_.getAngle();
+    final double azimuth = robot_.crosshairs_.getAzimuth();
+
+    FHeading = azimuth + roboAngle;
+    deccel = Math.sqrt(2 * robot_.constants_.STARDESTROYER_DECELERATION_G_LIMIT * 9.8 * Math.abs(azimuth));
+    startDeccel = (velocity >= deccel); //if true then start deccel
+
+    if (startDeccel) {
+      if (velocity > 0) {
+        velocity = 0; //based on VF^2 = V0^2 + 2AD
+      }
+    } else if (velocity < maxDPS) {
+      velocity = maxDPS;
+    }
+      
+    
+    
+    if (velocity > maxDPS) {
+      velocity = maxDPS;
+    } else if (azimuth <= 0.5 && azimuth >= -0.5 ) {
+      velocity = 0;
+    }
+    System.out.println((velocity) + "    " + azimuth + "    " + roboAngle + "******************");
+    
+    if (roboAngle < FHeading) {
+      robot_.chassis_.setRotation(velocity);
+    } else if (roboAngle > FHeading) {
+      robot_.chassis_.setRotation(-velocity);
+    }
+    //oldAngle = roboAngle;
+  }
+
+  @Override
+  public void end(boolean interrupted) {
+    robot_.chassis_.setRotation(0);
+  }
+
+  @Override
+  public boolean isFinished() {
+    return false;
+  }
+}

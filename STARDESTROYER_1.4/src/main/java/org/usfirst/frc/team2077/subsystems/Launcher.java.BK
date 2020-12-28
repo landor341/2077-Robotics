@@ -1,0 +1,325 @@
+package org.usfirst.frc.team2077.subsystems;
+
+import com.ctre.phoenix.motorcontrol.ControlMode;
+import com.ctre.phoenix.motorcontrol.FeedbackDevice;
+import com.ctre.phoenix.motorcontrol.can.TalonSRX;
+
+import static org.usfirst.frc.team2077.Robot.*;
+
+import edu.wpi.first.wpilibj2.command.SubsystemBase;
+
+public class Launcher extends SubsystemBase implements LauncherIF {
+
+    // motor controllers
+    private final TalonSRX screw_;
+    private final TalonSRX shooterL_;
+    private final TalonSRX shooterR_;
+    private final TalonSRX loader_;
+
+
+    // elevation screw
+
+    // Readings outside the safe range are assumed to be the result of broken or disconnected hardware.
+    // If the screw potentiometer reading is out of range the motor should not be operated.
+    private final double[] safeVoltageRange_ = {.05, 4.0}; // TODO: Confirm this is a reasonable range or adjust as necessary.
+
+    private final double[] operatingVoltageRange_ = {0.1, 2.6};
+
+    private final double powerValue_ = .9; // TODO: Confirm this is a reasonable value or adjust as necessary.
+
+    private final double positionTolerance_ = .02; // TODO: Confirm this is a reasonable value or adjust as necessary.
+
+    // angle setpoint (voltage returned by robot_.potentialSensor_.getScrewVoltage())
+    private double screwPosition_ = 0.1; // TODO: this should reflect hardware position at startup.
+    private double screwDirection_ = 0.; // setpoint changes operate in one direction only to avoid oscillation/instability
+
+
+    // launcher wheels
+
+    private boolean launcherRunning_ = false;
+    public double launcherRPM_ = 0;
+   
+    //public final double launcherMaxRPM_ = 4000; // TODO: Put in Constants.
+    public final double launcherMaxRPM_ = 8000; 
+    
+    private final double rightLeftBias = 0.0;  // TODO: Put in Constants?  
+
+    private final double unitsToRPM = (600. / 2048.);
+    private final double kP = 0.1;
+    private final double kI = 0.0001;
+    private final double kD = 0.0;
+
+
+
+
+
+
+
+
+
+    
+    private double[][] TestValues = {
+        {-1, operatingVoltageRange_[0], 0},
+        {66, 2.6, 3800},
+        {120, 2.6, 3225},
+        {180, 2.6, 3225},
+        {240, 2.6, 3400},
+        {300, 1.3, 4000},
+        {360, 2.6, 5000},
+        {420, 0.5, 5000},
+        {9999, operatingVoltageRange_[1], launcherMaxRPM_}
+    };
+
+
+
+
+    ///@Deprecated
+    //public void printInfraredReading(){ // TODO: Test code? move or remove
+    //    System.out.println(robot_.infraredSensor_.getInfraredVoltage());
+    //}
+
+
+
+
+    public Launcher() {
+        screw_ = new TalonSRX(3);
+        screw_.configFactoryDefault();
+
+        loader_ = new TalonSRX(6);
+        loader_.configFactoryDefault();
+
+        shooterL_ = new TalonSRX(4);
+        shooterL_.configFactoryDefault();
+        shooterL_.configSelectedFeedbackSensor(FeedbackDevice.QuadEncoder,0,0);
+        shooterL_.setSensorPhase(false);
+        shooterL_.configNominalOutputForward(0, 0);
+		shooterL_.configNominalOutputReverse(0, 0);
+		shooterL_.configPeakOutputForward(1, 0);
+        shooterL_.configPeakOutputReverse(-1, 0);
+        shooterL_.config_kF(0, 0.0, 0);
+		shooterL_.config_kP(0, kP, 0);
+		shooterL_.config_kI(0, kI, 0);
+		shooterL_.config_kD(0, kD, 0);
+
+        shooterR_ = new TalonSRX(5);
+        shooterR_.configFactoryDefault();
+        shooterR_.configSelectedFeedbackSensor(FeedbackDevice.QuadEncoder,0,0);
+        shooterR_.setSensorPhase(false);
+        shooterR_.configNominalOutputForward(0, 0);
+		shooterR_.configNominalOutputReverse(0, 0);
+		shooterR_.configPeakOutputForward(1, 0);
+		shooterR_.configPeakOutputReverse(-1, 0);
+        shooterR_.config_kF(0, 0.0, 0);
+		shooterR_.config_kP(0, kP, 0);
+		shooterR_.config_kI(0, kI, 0);
+		shooterR_.config_kD(0, kD, 0);
+
+        launcherRunning_ = false;
+        launcherRPM_ = 0;
+    }
+
+
+    @Override
+    public void periodic() { // continuous adjustment of screw motor toward setpoint
+
+        // stop if position reading is outside normal range due to disconnected wires, etc
+        double currentScrewPosition = getScrewPosition();
+        if (currentScrewPosition < safeVoltageRange_[0] || currentScrewPosition > safeVoltageRange_[1]) {
+            screw_.set(ControlMode.PercentOutput, 0);
+            return;
+        }
+
+        // stop if close enough to the set point
+        double error = screwPosition_ - currentScrewPosition;
+        if (Math.abs(error) < positionTolerance_) {
+            screw_.set(ControlMode.PercentOutput, 0);
+            return;
+        }
+
+        // stop if past the set point in the last adjustment direction
+        if (Math.signum(error) != screwDirection_) {
+            screw_.set(ControlMode.PercentOutput, 0);
+            return;
+        }
+
+        // TODO: could vary motor with error magnitude
+        screw_.set(ControlMode.PercentOutput, powerValue_ * screwDirection_);
+    }
+
+
+
+    @Override
+    public boolean setRangeLower(double range) {
+        return false;
+    }
+
+    @Override
+    public boolean setRangeUpper(double range) {
+        boolean done = false;
+        int i = -1;
+        while (!done) {
+            i++;
+            if (TestValues[i][0] > range) {
+                done = true;
+            }
+        }
+        setScrewPosition(TestValues[i][1]);
+        setLauncherRPM(TestValues[i][2]);
+
+        return true;
+    }
+
+    @Override
+    public void setRunning(boolean running) {
+        launcherRunning_ = running;
+        runLauncher(launcherRunning_ ? launcherRPM_ : 0);
+
+    }
+
+    @Override
+    public boolean isRunning() {
+        return launcherRunning_;
+    }
+
+    @Override
+    public boolean isReady() {
+        // TODO: isRunning() && isLoaded() && both motors within tolerance of target && angle within tolerance of target voltage
+        double wantedMotorSpeed = -((robot_.driveStation_.secondaryStick_.getThrottle() + 1.)/ 2.) * ((TestLauncher)robot_.launcher_).launchMaxRPM;
+        if ((isRunning() && isLoaded()) && (Math.abs(wantedMotorSpeed - getLauncherSpeed()[0]) < 50) && (Math.abs(wantedMotorSpeed - getLauncherSpeed()[1]) < 50) && Math.abs(screwPosition_ - getScrewPosition()) < 0.1 ) {
+            return true;
+        }
+        return false;
+    }
+
+    @Override
+    public void load() {
+        if (!isLoaded()) {
+            loader_.set(ControlMode.PercentOutput,1);
+        } else {
+            loader_.set(ControlMode.PercentOutput,0);
+        }
+    }
+
+    @Override
+    public boolean isLoaded() {
+        return robot_.infraredSensor_.getStatusIsLoaded();
+    }
+
+    @Override
+    public void launch() {
+        if (isLoaded()) {
+            setRangeUpper(robot_.crosshairs_.getTarget()[3]);
+            setRunning(true);
+            if (isReady()) {
+                runLoader(1.0);
+            }
+        } else {
+            load();
+        }
+    }
+
+
+
+
+
+    public void runAngle(boolean dir) {
+        if(dir) {
+            screw_.set(ControlMode.PercentOutput, 1.0);
+        } else {
+            screw_.set(ControlMode.PercentOutput, -1.0);
+        }
+        
+    }
+
+    public void stopAngle() {
+        screw_.set(ControlMode.PercentOutput, 0.0);
+    }
+
+
+
+
+
+
+
+    private void runLauncher(double velocity) {
+        shooterL_.set(ControlMode.Velocity,-velocity/unitsToRPM);
+        //shooterR_.set(ControlMode.Velocity,velocity/unitsToRPM);
+        shooterR_.set(ControlMode.Velocity,velocity*(1-rightLeftBias)/unitsToRPM);
+    }
+
+    @Deprecated
+    public void toggleLauncher(double velocity) {
+        if(launcherRunning_) {
+            shooterL_.set(ControlMode.PercentOutput,0.0);
+            shooterR_.set(ControlMode.PercentOutput,0.0);
+            launcherRunning_ = false;
+        } else {
+            shooterL_.set(ControlMode.Velocity,velocity/unitsToRPM);
+            shooterR_.set(ControlMode.Velocity,velocity*(1-rightLeftBias)/unitsToRPM);
+            launcherRunning_ = true;
+        }
+    }
+
+    @Deprecated
+     public double getLaunchVelL() {
+        double res = shooterL_.getSelectedSensorVelocity(0) * unitsToRPM;
+        
+        return res;
+    }
+    @Deprecated
+    public double getLaunchVelR() {
+        return shooterR_.getSelectedSensorVelocity(0) * unitsToRPM;
+    }
+
+    public double[] getLauncherSpeed() {
+        return new double[] {shooterL_.getSelectedSensorVelocity(0) * unitsToRPM, shooterR_.getSelectedSensorVelocity(0) * unitsToRPM};
+    }
+
+
+
+
+    public void runLoader(double speed) {
+        loader_.set(ControlMode.PercentOutput,speed);
+    }
+
+    public void stopLoader() {
+        loader_.set(ControlMode.PercentOutput,0.0);
+    }
+   
+    public void stopAll() {
+        shooterL_.set(ControlMode.PercentOutput,0.0);
+        shooterR_.set(ControlMode.PercentOutput,0.0);
+        loader_.set(ControlMode.PercentOutput,0.0);
+        screw_.set(ControlMode.PercentOutput,0.0);
+    }
+
+
+
+
+
+    public double getScrewPosition() {
+        return robot_.potentialSensor_.getScrewVoltage();
+    }
+
+
+    public void setScrewPosition(double goalVoltage){ //NEEDS CHECK
+
+        // Goal voltage within paramaters check
+        goalVoltage = Math.max(goalVoltage, operatingVoltageRange_[0]);
+        goalVoltage = Math.min(goalVoltage, operatingVoltageRange_[1]);
+
+        screwPosition_ = goalVoltage;
+        screwDirection_ = Math.signum(goalVoltage - getScrewPosition()); // 1.0 if to be adjusted up, -1.0 if down
+    }
+
+    public void setScrewPosition01(double setpoint01) {
+        setScrewPosition(operatingVoltageRange_[0] + (operatingVoltageRange_[1]-operatingVoltageRange_[0]) * setpoint01);
+    }
+
+    public void setLauncherRPM(double rpm) {
+        launcherRPM_ = rpm;
+        if (launcherRunning_) {
+            runLauncher(launcherRPM_);
+        }
+    }
+}

@@ -1,0 +1,79 @@
+/*----------------------------------------------------------------------------*/
+/* Copyright (c) 2020 FRC Team 2077. All Rights Reserved.                     */
+/* Open Source Software - may be modified and shared by FRC teams.            */
+/*----------------------------------------------------------------------------*/
+
+package org.usfirst.frc.team2077.commands;
+
+import edu.wpi.first.wpilibj2.command.CommandBase;
+
+import static org.usfirst.frc.team2077.Robot.*;
+
+public class ContinousAimToTarget2 extends CommandBase {
+  private double targetNorth;
+  private double targetEast;
+  private double[] targetPos;
+
+  /**
+   * Default to standard constants for the competition robot and real playing field.
+   */
+  public ContinousAimToTarget2() {
+    this(robot_.constants_.CAMERA_POSITION_NORTH, robot_.constants_.CAMERA_HEIGHT, robot_.constants_.CAMERA_TILT, robot_.constants_.UPPER_TARGET_HEIGHT);
+  }
+
+  /**
+   * Support for alternate robot and field configurations.
+   * @param cameraNorth Forward distance from chassis center to camera lens, in inches.
+   * @param camaraHeight Height of camera lens above floor, in inches.
+   * @param camaraTilt Upward tilt of camera axis in degrees.
+   * @param targetHeight Target height in inches.
+   */
+  public ContinousAimToTarget2(double cameraNorth, double camaraHeight, double cameraTilt, double targetHeight) {
+
+    //addRequirements(robot_.crosshairs_); // just looking, don't need exclusive ownership
+
+    double elevation = robot_.crosshairs_.getElevation(); // degrees upward from camera axis
+    elevation += cameraTilt; // degrees upward from horizontal
+
+    double distance = (targetHeight - camaraHeight) / Math.tan(Math.toRadians(elevation)); // horizontal distance from camera to target
+    
+    double azimuth = robot_.crosshairs_.getAzimuth(); // heading from camera axis to target
+    double north = distance * Math.cos(Math.toRadians(azimuth)); // orthogonal distances from camera to target 
+    double east = distance * Math.sin(Math.toRadians(azimuth));
+
+    north -= cameraNorth; // from chassis center to target (no need to adjust east because the camera is on the chassis center axis)
+    distance = Math.sqrt(north*north + east*east); // from chassis center to target
+    azimuth = Math.toDegrees(Math.atan2(east, north)); // from chassis center to target
+
+    elevation = Math.toDegrees(Math.atan2(targetHeight, distance)); // from floor at chassis center to target in degrees
+
+
+
+
+    //double heading = robot_.driveChassis_.getPosition()[2] + robot_.crosshairs_.getAzimuth(); //gives heading from north to target
+    double heading = robot_.chassis_.getPosition()[2] + robot_.crosshairs_.getAzimuth(); //gives heading from north to target
+
+    targetPos = new double[] { //north, east
+      Math.cos(Math.toRadians(heading)) * distance + robot_.chassis_.getPosition()[0],
+      Math.sin(Math.toRadians(heading)) * distance + robot_.chassis_.getPosition()[1]
+    };
+
+  }
+
+  @Override
+  public void execute() {
+    //Below is absolute distance to target for giving to shoot aim function
+    double distance = Math.sqrt(Math.pow(targetPos[0] - robot_.chassis_.getPosition()[0], 2) + Math.pow(targetPos[1] - robot_.chassis_.getPosition()[1], 2));
+    //uses atan for opp/adj (east/north). Finds heading needed for aiming towards target
+    double heading = Math.atan((targetPos[1] - robot_.chassis_.getPosition()[1]) / (targetPos[0] - robot_.chassis_.getPosition()[0]));
+  }
+
+  @Override
+  public void end(boolean interrupted) {
+  }
+
+  @Override
+  public boolean isFinished() {
+    return false;
+  }
+}

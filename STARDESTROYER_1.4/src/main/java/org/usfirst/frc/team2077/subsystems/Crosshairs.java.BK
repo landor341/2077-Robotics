@@ -1,0 +1,295 @@
+/*----------------------------------------------------------------------------*/
+/* Copyright (c) 2020 FRC Team 2077. All Rights Reserved.                     */
+/* Open Source Software - may be modified and shared by FRC teams.            */
+/*----------------------------------------------------------------------------*/
+
+package org.usfirst.frc.team2077.subsystems;
+
+import edu.wpi.first.networktables.NetworkTableEntry;
+import edu.wpi.first.wpilibj2.command.SubsystemBase;
+
+import static org.usfirst.frc.team2077.Robot.*;
+
+public class Crosshairs extends SubsystemBase {
+
+    private final String cameraID_;
+    private final int pixelWidth_;
+    private final int pixelHeight_;
+    private final int pixelFocalLength_;
+    private final double cameraNorth_;
+    private final double cameraHeight_;
+    private final double cameraTilt_;
+    private final double targetHeight_;
+
+    private double pixelX_ = 0;
+    private double pixelY_ = 0;
+
+    private double targetNorth_ = 0;
+    private double targetEast_ = 0;
+    private double targetRange_ = 0;
+    private double targetAzimuth_ = 0;
+
+    /**
+     * Default to standard upper target height for real playing field.
+     * @param cameraID Unique camera identifier for display on drive station.
+     * @param pixelWidth Camera image width.
+     * @param pixelHeight Camera image height.
+     * @param pixelFocalLength Camera focal length in pixels.
+     * @param cameraNorth Forward distance from chassis center to camera lens, in inches.
+     * @param cameraHeight Height of camera lens above floor, in inches.
+     * @param cameraTilt Upward tilt of camera axis in degrees.
+     */
+    public Crosshairs(String cameraID, int pixelWidth, int pixelHeight, int pixelFocalLength,
+        double cameraNorth, double cameraHeight, double cameraTilt) {
+
+        this(cameraID, pixelWidth, pixelHeight, pixelFocalLength,
+            robot_.constants_.CAMERA_POSITION_NORTH, robot_.constants_.CAMERA_HEIGHT, robot_.constants_.CAMERA_TILT,
+            robot_.constants_.UPPER_TARGET_HEIGHT);
+    }
+
+    /**
+     * Support for alternate practice target.
+     * @param cameraID Unique camera identifier for display on drive station.
+     * @param pixelWidth Camera image width.
+     * @param pixelHeight Camera image height.
+     * @param pixelFocalLength Camera focal length in pixels.
+     * @param cameraNorth Forward distance from chassis center to camera lens, in inches.
+     * @param cameraHeight Height of camera lens above floor, in inches.
+     * @param cameraTilt Upward tilt of camera axis in degrees.
+     * @param targetHeight Target height in inches.
+     */
+    public Crosshairs(String cameraID, int pixelWidth, int pixelHeight, int pixelFocalLength, 
+        double cameraNorth, double cameraHeight, double cameraTilt, double targetHeight) {
+
+        cameraID_ = cameraID;
+        pixelWidth_ = pixelWidth;
+        pixelHeight_ = pixelHeight;
+        pixelFocalLength_ = pixelFocalLength;
+        cameraNorth_ = cameraNorth;
+        cameraHeight_ = cameraHeight;
+        cameraTilt_ = cameraTilt;
+        targetHeight_ = targetHeight;
+        targetToCamera(); // set pixelX_, pixelY_
+    }
+
+    public void setTargetOnCamera(double pixelX, double pixelY) {
+
+        pixelX_ = pixelX;
+        pixelY_ = pixelY;
+
+        cameraToTarget();
+    }
+
+    public double[] getTargetOnCamera() {
+        return new double[] {pixelX_, pixelY_, pixelWidth_, pixelHeight_};
+    }
+
+    public void setTarget(double north, double east, double azimuth) { /// TODO: Remove azimuth.
+
+        targetNorth_ = north;
+        targetEast_ = east;
+        targetAzimuth_ = Math.toDegrees(Math.atan2(targetEast_, targetNorth_));
+        targetRange_ = Math.sqrt(north*north + east*east);
+
+        targetToCamera();
+    }
+
+    public void setTarget(double azimuth, double range) {
+
+        targetNorth_ = range * Math.cos(Math.toRadians(azimuth));
+        targetEast_ = range * Math.sin(Math.toRadians(azimuth));
+        targetAzimuth_ = azimuth;
+        targetRange_ = range;
+
+        targetToCamera();
+    }
+
+    public double[] getTarget() {
+        //cameraToTarget();
+        return new double[] {targetNorth_, targetEast_, targetAzimuth_, targetRange_};
+    }
+
+    private void cameraToTarget() {
+
+        // Fisheye camera w/ horizontal cylindrical projection, 2/25 version
+        //   resolution = 1000x1000
+        //   camera tilt = 0
+        //   elevation = pixelY_ * .13
+        //   horizontal focal length = 334 pixels
+        //   azimuth = atan2(pixelX_, 334)
+        //   (before adjustments for camera position)
+
+        //double elevation = Math.toDegrees(Math.atan2(pixelY_, pixelFocalLength_)); // degrees upward from camera axis (perspective projection)
+        double elevation = pixelY_ * 0.13;// degrees upward from camera axis (horizontal cylindrical projection, 2/25 version)
+        elevation += cameraTilt_; // degrees upward from horizontal
+        double range = (targetHeight_ - cameraHeight_) / Math.tan(Math.toRadians(elevation)); // horizontal distance from camera to target
+        double azimuth = Math.toDegrees(Math.atan2(pixelX_, pixelFocalLength_)); // heading from camera axis to target
+        double north = range * Math.cos(Math.toRadians(azimuth)); // orthogonal distances from camera to target 
+        double east = range * Math.sin(Math.toRadians(azimuth));
+    
+        north += cameraNorth_; // from chassis center to target (no need to adjust east because the camera is in the east==0 plane)
+        range = Math.sqrt(north*north + east*east); // from chassis center to target
+        azimuth = Math.toDegrees(Math.atan2(east, north)); // from chassis center to target
+    
+        targetNorth_ = north;
+        targetEast_ = east;
+        targetRange_ = range;
+        targetAzimuth_ = azimuth;
+    }
+
+    private void targetToCamera() {
+
+        double east = targetEast_;
+        double north = targetNorth_;
+        double azimuth = targetAzimuth_;
+        double range = targetRange_;
+
+        north -= cameraNorth_;
+        azimuth = Math.toDegrees(Math.atan2(east, north)); // from camera to target
+        range = Math.sqrt(north*north + east*east); // from camera to target
+        double elevation = Math.toDegrees(Math.atan2(targetHeight_ - cameraHeight_, range)); // from ground to target
+        elevation -= cameraTilt_; // from camera axis to target
+
+        pixelX_ = pixelFocalLength_ * Math.tan(Math.toRadians(azimuth));
+        //pixelY_ = pixelFocalLength_ * Math.tan(Math.toRadians(elevation)); // perspective projection
+        pixelY_ = elevation / 0.13; // horizontal cylindrical projection, 2/25 version
+    }
+
+    //@Override
+    public String toString() {
+        return cameraID_ + " " + toString(getTarget()) + "   " + toString(getTargetOnCamera());
+    }
+
+    private static String toString(double[] doubleArray) {
+        StringBuffer sb = new StringBuffer();
+        for (Double d : doubleArray) {
+            sb.append(Math.round(d * 10.) / 10.);
+            sb.append(" ");
+        }
+        return sb.toString().trim();
+    }
+
+    /**
+     * Test code.
+     * May be run locally in VSCode.
+     */
+    public static void main(String[] argv) {
+        Crosshairs crosshairs;
+        double[] c;
+        double[] t;
+
+        System.out.println();
+        crosshairs = new Crosshairs("Test Camera", 640, 360, 620, 0, 0, 0, 100);
+
+        crosshairs.setTargetOnCamera(0, 100);
+        System.out.println(toString(c = crosshairs.getTargetOnCamera()) + "(expect 0, 100)");
+        System.out.println(toString(t = crosshairs.getTarget()) + "(expect 620, 0, 0, 620)");
+
+        crosshairs.setTarget(t[0], t[1], t[2]);
+        System.out.println(toString(t = crosshairs.getTarget()) + "(expect 620, 0, 0, 620)");
+        System.out.println(toString(c = crosshairs.getTargetOnCamera()) + "(expect 0, 100)");
+
+        crosshairs.setTarget(t[2], t[3]);        
+        System.out.println(toString(c = crosshairs.getTargetOnCamera()) + "(expect 0, 100)");
+
+        crosshairs.setTargetOnCamera(100, 100);
+        System.out.println(toString(c = crosshairs.getTargetOnCamera()) + "(expect 100, 100)");
+        System.out.println(toString(t = crosshairs.getTarget()) + "(expect 612.1, 98.7, 9.2, 620)");
+
+        crosshairs.setTarget(t[0], t[1], t[2]);
+        System.out.println(toString(t = crosshairs.getTarget()) + "(expect 612.1, 98.7, 9.2, 620)");
+        System.out.println(toString(c = crosshairs.getTargetOnCamera()) + "(expect 100, 100)");
+
+        crosshairs.setTarget(t[2], t[3]);        
+        System.out.println(toString(c = crosshairs.getTargetOnCamera()) + "(expect 100, 100)");
+
+        
+        System.out.println();
+        crosshairs = new Crosshairs("Test Camera", 640, 360, 620, 0, 0, 10, 100);
+
+        crosshairs.setTargetOnCamera(0, 100);
+        System.out.println(toString(c = crosshairs.getTargetOnCamera()) + "(expect 0, 100)");
+        System.out.println(toString(t = crosshairs.getTarget()) + "(expect 287.8, 0, 0, 287.8)");
+
+        crosshairs.setTarget(t[0], t[1], t[2]);
+        System.out.println(toString(t = crosshairs.getTarget()) + "(expect 287.8, 0, 0, 287.8)");
+        System.out.println(toString(c = crosshairs.getTargetOnCamera()) + "(expect 0, 100)");
+
+        crosshairs.setTarget(t[2], t[3]);       
+        System.out.println(toString(c = crosshairs.getTargetOnCamera()) + "(expect 0, 100)");
+
+        crosshairs.setTargetOnCamera(100, 100);
+        System.out.println(toString(c = crosshairs.getTargetOnCamera()) + "(expect 100, 100)");
+        System.out.println(toString(t = crosshairs.getTarget()) + "(expect 284.1, 45.8, 9.2, 287.8)");
+
+        crosshairs.setTarget(t[0], t[1], t[2]);
+        System.out.println(toString(t = crosshairs.getTarget()) + "(expect 284.1, 45.8, 9.2, 287.8)");
+        System.out.println(toString(c = crosshairs.getTargetOnCamera()) + "(expect 100, 100)");
+
+        crosshairs.setTarget(t[2], t[3]);       
+        System.out.println(toString(c = crosshairs.getTargetOnCamera()) + "(expect 100, 100)");
+
+        
+        System.out.println();
+        crosshairs = new Crosshairs("Test Camera", 640, 360, 620, 0, 20, 10, 100);
+
+        crosshairs.setTargetOnCamera(0, 100);
+        System.out.println(toString(c = crosshairs.getTargetOnCamera()) + "(expect 0, 100)");
+        System.out.println(toString(t = crosshairs.getTarget()) + "(expect 230.2, 0, 0, 230.2)");
+
+        crosshairs.setTarget(t[0], t[1], t[2]);
+        System.out.println(toString(t = crosshairs.getTarget()) + "(expect 230.2, 0, 0, 230.2)");
+        System.out.println(toString(c = crosshairs.getTargetOnCamera()) + "(expect 0, 100)");
+
+        crosshairs.setTarget(t[2], t[3]);       
+        System.out.println(toString(c = crosshairs.getTargetOnCamera()) + "(expect 0, 100)");
+
+        crosshairs.setTargetOnCamera(100, 100);
+        System.out.println(toString(c = crosshairs.getTargetOnCamera()) + "(expect 100, 100)");
+        System.out.println(toString(t = crosshairs.getTarget()) + "(expect 227.3, 36.7, 9.2, 230.2)");
+
+        crosshairs.setTarget(t[0], t[1], t[2]);
+        System.out.println(toString(t = crosshairs.getTarget()) + "(expect 227.3, 36.7, 9.2, 230.2)");
+        System.out.println(toString(c = crosshairs.getTargetOnCamera()) + "(expect 100, 100)");
+
+        crosshairs.setTarget(t[2], t[3]);       
+        System.out.println(toString(c = crosshairs.getTargetOnCamera()) + "(expect 100, 100)");
+
+        
+        System.out.println();
+        crosshairs = new Crosshairs("Test Camera", 640, 360, 620, 30, 20, 10, 100);
+
+        crosshairs.setTargetOnCamera(0, 100);
+        System.out.println(toString(c = crosshairs.getTargetOnCamera()) + "(expect 0, 100)");
+        System.out.println(toString(t = crosshairs.getTarget()) + "(expect 200.2, 0, 0, 200.2)");
+
+        crosshairs.setTarget(t[0], t[1], t[2]);
+        System.out.println(toString(t = crosshairs.getTarget()) + "(expect 200.2, 0, 0, 200.2)");
+        System.out.println(toString(c = crosshairs.getTargetOnCamera()) + "(expect 0, 100)");
+
+        crosshairs.setTarget(t[2], t[3]);       
+        System.out.println(toString(c = crosshairs.getTargetOnCamera()) + "(expect 0, 100)");
+
+        crosshairs.setTargetOnCamera(100, 100);
+        System.out.println(toString(c = crosshairs.getTargetOnCamera()) + "(expect 100, 100)");
+        System.out.println(toString(t = crosshairs.getTarget()) + "(expect 197.3, 36.7, 10.5, 200.7)");
+
+        crosshairs.setTarget(t[0], t[1], t[2]);
+        System.out.println(toString(t = crosshairs.getTarget()) + "(expect 197.3, 36.7, 10.5, 200.7)");
+        System.out.println(toString(c = crosshairs.getTargetOnCamera()) + "(expect 100, 100)");
+
+        crosshairs.setTarget(t[2], t[3]);       
+        System.out.println(toString(c = crosshairs.getTargetOnCamera()) + "(expect 100, 100)");
+
+        crosshairs.setTargetOnCamera(-200, 100);
+        System.out.println(toString(c = crosshairs.getTargetOnCamera()) + "(expect -200, 100)");
+        System.out.println(toString(t = crosshairs.getTarget()) + "(expect 189.1, -70.7, -20.5, 201.9)");
+
+        crosshairs.setTarget(t[0], t[1], t[2]);
+        System.out.println(toString(t = crosshairs.getTarget()) + "(expect 189.1, -70.7, -20.5, 201.9)");
+        System.out.println(toString(c = crosshairs.getTargetOnCamera()) + "(expect -200, 100)");
+
+        crosshairs.setTarget(t[2], t[3]);       
+        System.out.println(toString(c = crosshairs.getTargetOnCamera()) + "(expect -200, 100)");
+    }
+}
